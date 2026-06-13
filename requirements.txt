@@ -1,2 +1,3 @@
 PyQt6>=6.5
 pynput>=1.7 ; sys_platform == "darwin"
+pyobjc-framework-Cocoa>=10 ; sys_platform == "darwin"

@@ -31,6 +31,43 @@ try:
 except ImportError:
     HAS_PYNPUT = False
 
+# Try pyobjc so our windows can follow the user across macOS Spaces
+# instead of being pinned to whichever Space they were first shown on
+try:
+    import objc
+    from AppKit import (NSApplication, NSApplicationActivationPolicyAccessory,
+                         NSWindowCollectionBehaviorCanJoinAllSpaces,
+                         NSWindowCollectionBehaviorFullScreenAuxiliary,
+                         NSWindowCollectionBehaviorStationary,
+                         NSWindowCollectionBehaviorIgnoresCycle,
+                         NSScreenSaverWindowLevel)
+    HAS_APPKIT = True
+except ImportError:
+    HAS_APPKIT = False
+
+
+def join_active_space(widget):
+    """Keep a floating window visible above every other app/Space,
+    including other apps' fullscreen Spaces: raise it to screen-saver
+    level and let it follow the user to the active Space instead of
+    being pinned to the Space (and app) it was first shown on."""
+    if not HAS_APPKIT:
+        return
+    try:
+        ns_view = objc.objc_object(c_void_p=int(widget.winId()))
+        ns_window = ns_view.window()
+        if ns_window is not None:
+            ns_window.setCollectionBehavior_(
+                NSWindowCollectionBehaviorCanJoinAllSpaces
+                | NSWindowCollectionBehaviorFullScreenAuxiliary
+                | NSWindowCollectionBehaviorStationary
+                | NSWindowCollectionBehaviorIgnoresCycle
+            )
+            ns_window.setLevel_(NSScreenSaverWindowLevel)
+            ns_window.setHidesOnDeactivate_(False)
+    except Exception:
+        pass
+
 
 # ---------------------------------------------------------------- constants
 
@@ -476,6 +513,7 @@ class Canvas(QWidget):
         self.setGeometry(geo)
         self.toolbar.move(12, (geo.height() - self.toolbar.height()) // 2)
         self.show()
+        join_active_space(self)
         self.raise_()
         self.activateWindow()
 
@@ -496,6 +534,7 @@ class Canvas(QWidget):
 
     def resume(self):
         self.show()
+        join_active_space(self)
         self.raise_()
         self.activateWindow()
 
@@ -1177,6 +1216,7 @@ class Launcher(QWidget):
         self.btn_live.show()
         self.adjustSize()
         self.show()
+        join_active_space(self)
         self.raise_()
 
     def show_paused(self):
@@ -1186,6 +1226,7 @@ class Launcher(QWidget):
         self.btn_resume.show()
         self.adjustSize()
         self.show()
+        join_active_space(self)
         self.raise_()
 
     def on_resume(self):
@@ -1258,12 +1299,18 @@ def setup_global_hotkey(launcher):
 def main():
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
+    if HAS_APPKIT:
+        # Accessory apps (no Dock icon) can show floating windows over
+        # other apps' fullscreen Spaces; regular apps cannot.
+        NSApplication.sharedApplication().setActivationPolicy_(
+            NSApplicationActivationPolicyAccessory)
     launcher = Launcher()
     
     # set up the global hotkey
     hotkey_bridge = setup_global_hotkey(launcher)  # noqa: F841  keep ref alive
     
     launcher.show()
+    join_active_space(launcher)
     sys.exit(app.exec())
 
 
