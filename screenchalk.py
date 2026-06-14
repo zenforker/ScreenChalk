@@ -487,6 +487,15 @@ class Canvas(QWidget):
             self.annot = QPixmap(int(geo.width() * dpr), int(geo.height() * dpr))
             self.annot.setDevicePixelRatio(dpr)
         else:
+            # Make sure any overlay from a previous session is fully gone
+            # before grabbing, otherwise its annotations can get baked
+            # into this screenshot (the compositor needs a moment to
+            # redraw after a translucent overlay window is hidden).
+            self.hide()
+            QApplication.processEvents()
+            import time
+            time.sleep(0.15)
+
             self.screenshot = screen.grabWindow(0)
             if self.screenshot.isNull() or self.screenshot.width() == 0:
                 self.launcher.show_error("Screen capture failed. Grant permission in System Settings -> Privacy & Security -> Screen Recording, then restart.")
