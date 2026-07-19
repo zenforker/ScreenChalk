@@ -45,6 +45,17 @@ try:
 except ImportError:
     HAS_APPKIT = False
 
+# Try Quartz for the macOS Screen Recording permission preflight. Without
+# that permission, screen capture silently returns ONLY the desktop wallpaper
+# (a valid, non-null image) rather than failing, so the user's windows vanish
+# from the frozen page. We must check the permission before freezing.
+try:
+    from Quartz import (CGPreflightScreenCaptureAccess,
+                        CGRequestScreenCaptureAccess)
+    HAS_SCREEN_CAPTURE_API = True
+except ImportError:
+    HAS_SCREEN_CAPTURE_API = False
+
 
 def join_active_space(widget):
     """Keep a floating window visible above every other app/Space,
@@ -487,6 +498,21 @@ class Canvas(QWidget):
             self.annot = QPixmap(int(geo.width() * dpr), int(geo.height() * dpr))
             self.annot.setDevicePixelRatio(dpr)
         else:
+            # Frozen mode needs Screen Recording permission. When it is
+            # missing, macOS screen capture does not fail — it silently
+            # returns only the desktop wallpaper, so the user's windows
+            # disappear and the frozen page looks blank/screensaver-like.
+            # Preflight the permission and bail out with clear guidance
+            # instead of freezing a wallpaper-only capture.
+            if HAS_SCREEN_CAPTURE_API and not CGPreflightScreenCaptureAccess():
+                CGRequestScreenCaptureAccess()  # prompt + register app in the list
+                self.launcher.show_error(
+                    "ScreenChalk needs Screen Recording permission to freeze the "
+                    "screen.\n\nWithout it, macOS captures only the desktop "
+                    "wallpaper and your windows disappear. Enable it in System "
+                    "Settings -> Privacy & Security -> Screen Recording, then "
+                    "quit and reopen ScreenChalk.")
+                return
             # Make sure any overlay from a previous session is fully gone
             # before grabbing, otherwise its annotations can get baked
             # into this screenshot (the compositor needs a moment to
@@ -667,7 +693,23 @@ class Canvas(QWidget):
         self.update()
 
     def save_file(self):
-        path, _ = QFileDialog.getSaveFileName(self, "Save image", "screenchalk.png", "PNG (*.png);;JPEG (*.jpg)")
+        # The canvas overlay is full-screen, stays-on-top, and sits at
+        # NSScreenSaverWindowLevel. A native save panel runs far below that
+        # level, so it opens *behind* the overlay — which then swallows every
+        # click, making the dialog look frozen. Hide the overlay while the
+        # modal dialog is up, then restore it. composite() reads from the
+        # stored screenshot/annot (frozen) or re-grabs the screen (live), so
+        # it doesn't need the overlay visible.
+        self.hide()
+        QApplication.processEvents()
+        try:
+            path, _ = QFileDialog.getSaveFileName(
+                self, "Save image", "screenchalk.png", "PNG (*.png);;JPEG (*.jpg)")
+        finally:
+            self.show()
+            join_active_space(self)
+            self.raise_()
+            self.activateWindow()
         if path:
             self.composite().save(path)
 
